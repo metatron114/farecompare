@@ -1,0 +1,49 @@
+# ============================================================================
+# 运行时缓存（cache/）
+# ============================================================================
+# 内置基础数据会随仓库一起分发，让程序 clone 后即可离线启动；
+# 但登录态缓存与浏览器临时目录必须排除。
+#   stations.json               12306 官方站名表（3396 站）
+#   passenger_city_stations.json gaotie 客运车站目录（5710 站 + 拼音标识）
+#   passenger_stations.json     运行中累积的"实测确认客运站"（会持续增长）
+#   city_codes.json / airports.json  民航城市与三字码
+#   blocked_stations.json       手工屏蔽的车站名单
+cache/*
+!cache/.gitkeep
+!cache/stations.json
+!cache/passenger_city_stations.json
+!cache/passenger_stations.json
+!cache/city_codes.json
+!cache/airports.json
+!cache/blocked_stations.json
+
+# ⚠ 火狐登录 Cookie 缓存：包含真实账号登录态，绝对不能提交
+cache/cookies.json
+
+# 浏览器自动化的用户数据目录
+cache/edge-profile/
+.edge-profile/
+.edge-profile-cdp/
+
+# ============================================================================
+# Python
+# ============================================================================
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+
+# ============================================================================
+# 编辑器与系统
+# ============================================================================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

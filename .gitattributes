@@ -1,0 +1,26 @@
+# 统一换行符：仓库内一律用 LF，检出到 Windows 时自动转 CRLF
+* text=auto eol=lf
+
+# Windows 批处理必须是 CRLF，否则可能无法执行
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制/数据文件不做换行转换
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+
+# 语言与生成文件识别
+*.py text
+*.js text
+*.css text
+*.html text
+*.md text
+*.toml text
+*.json text
+
+# 让 GitHub 语言统计不把数据文件算进去
+cache/*.json linguist-generated=true
+cache/*.json -diff

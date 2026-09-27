@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>车票 · 机票 比价搜索</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <div class="brand">
+      <span class="brand-mark">票</span>
+      <div>
+        <h1>车票 · 机票 比价搜索</h1>
+        <p class="brand-sub">12306 实时车票 + 机票价格，支持多条线路中转，按最低价排序</p>
+      </div>
+    </div>
+    <button id="healthBtn" class="ghost-btn" type="button">数据源状态</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- 搜索表单 -->
+  <section class="card search-card">
+    <form id="searchForm" autocomplete="off">
+      <div class="field-row">
+        <div class="field">
+          <label for="fromCity">出发地</label>
+          <div class="ac-wrap">
+            <input id="fromCity" name="from" placeholder="城市或车站，如 北京 / 上海虹桥" required>
+            <div class="ac" id="acFrom" hidden></div>
+          </div>
+        </div>
+        <button type="button" id="swapBtn" class="swap" title="交换出发地与目的地">⇄</button>
+        <div class="field">
+          <label for="toCity">目的地</label>
+          <div class="ac-wrap">
+            <input id="toCity" name="to" placeholder="城市或车站，如 上海 / 广州南" required>
+            <div class="ac" id="acTo" hidden></div>
+          </div>
+        </div>
+        <div class="field field-date">
+          <label for="date">出发日期</label>
+          <input id="date" name="date" type="date" required>
+        </div>
+        <div class="field field-range" id="rangeFields" hidden>
+          <label for="dateEnd">区间结束日期</label>
+          <input id="dateEnd" name="end" type="date">
+        </div>
+      </div>
+
+      <div class="field-row options-row">
+        <div class="seg" id="dateMode">
+          <button type="button" class="seg-btn active" data-mode="single">单日</button>
+          <button type="button" class="seg-btn" data-mode="range">日期区间</button>
+        </div>
+        <label class="check"><input type="checkbox" id="optTrain" checked><span>火车</span></label>
+        <label class="check"><input type="checkbox" id="optFlight" checked><span>飞机</span></label>
+        <label class="check"><input type="checkbox" id="optTransfer" checked><span>多条线路中转</span></label>
+        <label class="check"><input type="checkbox" id="optAirRail"><span>航铁联程（飞机+高铁）</span></label>
+        <label class="check"><input type="checkbox" id="optDirect"><span>只看直达</span></label>
+        <label class="check"><input type="checkbox" id="optNoBag" checked><span>屏蔽无免费托运航班</span></label>
+        <div class="field field-budget">
+          <label for="budget">预算上限（元）</label>
+          <input id="budget" type="number" min="0" step="10" placeholder="不限">
+        </div>
+        <div class="quick-dates" id="quickDates"></div>
+      </div>
+
+      <div class="submit-row">
+        <button type="submit" id="searchBtn" class="primary-btn">开始比价</button>
+        <span class="hint">含中转的完整搜索约需 1–3 分钟（12306 限流，程序自动串行请求）；日期区间模式先出每日最低价，再点单日做详细比价</span>
+      </div>
+    </form>
+  </section>
+
+  <!-- 日期区间结果 -->
+  <section id="rangeArea" class="card range-card" hidden>
+    <div class="range-head">
+      <div>
+        <h2 id="rangeTitle">日期区间最低价</h2>
+        <p id="rangeSub" class="muted"></p>
+      </div>
+      <button type="button" id="rangeClose" class="ghost-btn">关闭</button>
+    </div>
+    <div id="rangeGrid" class="range-grid"></div>
+    <p id="rangeNote" class="notice" hidden></p>
+    <label class="check" style="margin-top:12px">
+      <input type="checkbox" id="optRangeTrain">
+      <span>同时抽样火车每日最低价（需逐日查 12306，较慢，约 5 秒/天）</span>
+    </label>
+  </section>
+
+  <!-- 进度 -->
+  <section id="progressCard" class="card progress-card" hidden>
+    <div class="progress-head">
+      <span id="progressText">准备中…</span>
+      <span id="progressPct">0%</span>
+    </div>
+    <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
+  </section>
+
+  <!-- 错误 -->
+  <section id="errorCard" class="card error-card" hidden>
+    <strong>出错了</strong>
+    <p id="errorText"></p>
+  </section>
+
+  <!-- 结果 -->
+  <section id="resultArea" hidden>
+    <div class="card summary-card">
+      <div class="summary-top">
+        <div>
+          <h2 id="summaryTitle">—</h2>
+          <p id="summarySub" class="muted"></p>
+        </div>
+        <div class="best-price">
+          <span class="muted">最低价</span>
+          <strong id="bestPrice">—</strong>
+        </div>
+      </div>
+      <p id="conclusion" class="conclusion"></p>
+      <div id="modeCompare" class="mode-compare"></div>
+      <p id="flightNote" class="notice" hidden></p>
+    </div>
+
+    <div class="card list-card">
+      <div class="list-head">
+        <div class="tabs" id="tabs">
+          <button class="tab active" data-mode="all">全部</button>
+          <button class="tab" data-mode="train">火车</button>
+          <button class="tab" data-mode="flight">飞机</button>
+          <button class="tab" data-mode="transfer">中转</button>
+        </div>
+        <div class="sort-wrap">
+          <label for="sortSel" class="muted">排序</label>
+          <select id="sortSel">
+            <option value="price">价格最低优先</option>
+            <option value="duration">耗时最短优先</option>
+            <option value="value">性价比优先</option>
+            <option value="depart">出发时间最早</option>
+            <option value="transfers">换乘最少</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="thead">
+        <span>排序</span><span>方式</span><span>方案 / 路线</span><span>出发 → 到达</span>
+        <span>耗时</span><span>价格</span><span>来源</span><span></span>
+      </div>
+      <div id="rows" class="rows"></div>
+      <p id="emptyHint" class="empty" hidden>没有符合条件的方案，请放宽筛选条件。</p>
+    </div>
+
+    <p class="foot-note" id="footNote"></p>
+  </section>
+
+  <!-- 数据源状态 -->
+  <section id="healthCard" class="card health-card" hidden>
+    <h2>数据源状态</h2>
+    <div id="healthBody"></div>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
