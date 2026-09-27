@@ -70,7 +70,16 @@ def _present(all_options: list[dict], params: dict, meta: dict) -> dict:
         depart_from=params.get("depart_from"),
         depart_to=params.get("depart_to"),
     )
-    ordered = rank(filtered, sort=params.get("sort", "price"), limit=60)
+    sort = params.get("sort", "price")
+    # Pareto 前沿剪枝：默认在"价格/耗时"维度上剔除被支配的方案
+    # （即"既比别的方案贵、又比它慢"的那些），用户可显式关闭并查看全量。
+    # 对"出发时间/换乘次数"这类排序不做剪枝——那不是价格-耗时权衡关系。
+    use_pareto = params.get("pareto")
+    if use_pareto is None:
+        use_pareto = sort in ("price", "duration", "value")
+    before = len(filtered)
+    ordered = rank(filtered, sort=sort, limit=60, pareto=bool(use_pareto))
+    pruned = (before - len(ordered)) if use_pareto else 0
     errors = list(meta.get("errors", []))
     budget_used = meta.get("budget_used")
     budget_limit = meta.get("budget_limit")
@@ -83,6 +92,8 @@ def _present(all_options: list[dict], params: dict, meta: dict) -> dict:
         "summary": summarize(ordered),
         "comparison": comparison_table(ordered),
         "all_count": len(all_options),
+        "pareto": bool(use_pareto),
+        "pareto_pruned": pruned,
         "flight_note": meta.get("flight_note", ""),
         "flight_source": meta.get("flight_source", ""),
         "flight_provider": meta.get("flight_provider", ""),

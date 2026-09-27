@@ -296,8 +296,12 @@ function renderResult(res) {
   const q = res.query || {};
   $('summaryTitle').textContent = `${q.from} → ${q.to} · ${q.date} ${q.weekday || ''}`;
   const s = res.summary || {};
+  const pruneInfo = (res.pareto && res.pareto_pruned)
+    ? `　已按「价格-耗时」前沿剪掉 ${res.pareto_pruned} 个被支配方案`
+    : '';
   $('summarySub').textContent =
     `共 ${s.count || 0} 个方案（火车 ${s.train_count || 0} · 飞机 ${s.flight_count || 0} · 中转 ${s.transfer_count || 0}）`
+    + pruneInfo
     + `　耗时 ${res.elapsed || 0}s　生成于 ${res.generated_at || ''}`;
   $('bestPrice').textContent = s.price_min != null ? fmtPrice(s.price_min) : '—';
   $('conclusion').textContent = (res.comparison && res.comparison.conclusion) || '';

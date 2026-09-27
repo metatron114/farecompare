@@ -181,7 +181,73 @@ def build_options(direct: dict, transfers: list[dict],
     return options
 
 
-def rank(options: list[dict], sort: str = "price", limit: int = 40) -> list[dict]:
+def _pareto_frontier(options: list[dict],
+                     price_key: str = "price",
+                     time_key: str = "duration_min") -> list[dict]:
+    """Pareto 前沿：只保留"更便宜且更快"的选项，被支配的丢弃。
+
+    判定规则：选项 A 支配 B ⟺ A 的价格 ≤ B 且 A 的耗时 ≤ B，且至少一项严格更优。
+    因此被剔除的都是"既比某个方案贵、又比它慢"的方案——对用户毫无价值。
+
+    注意：这里必须用 **累计最优** 来判定，而不是只跟"已保留的任意一个"比。
+    排序后按下标递增扫描时，价格单调不减；但只要维护住
+    "此前见过的最短耗时"，就能用 O(n log n)（排序 + 一次线性扫描）拿到真正的
+    前沿，避免 O(n²) 的双重循环。
+    """
+    if not options:
+        return []
+    data = [o for o in options
+            if isinstance(o.get(price_key), (int, float))
+            and isinstance(o.get(time_key), (int, float))]
+    if not data:
+        return list(options)
+
+    # 价格升序；同价格时耗时升序，保证便宜且快的先出现
+    data.sort(key=lambda o: (o[price_key], o[time_key]))
+    frontier: list[dict] = []
+    best_time = float("inf")
+    for o in data:
+        t = o[time_key]
+        if t < best_time:            # 耗时更短才可能进入前沿
+            frontier.append(o)
+            best_time = t
+        # 耗时 >= best_time 说明已被"更便宜且不慢"的方案支配，丢弃
+    return frontier
+
+
+def dedup_options(options: list[dict]) -> list[dict]:
+    """去掉重复方案。
+
+    同一趟车可能被多个车站组合查出（如 北京→广州 会查 北京西/北京/北京南 × 广州/广州南），
+    得到的是"同一车次 + 同一时刻 + 同席别"的重复条目，展示多份没有意义。
+
+    去重键在字段缺失时自动退化（用 title/route/出发时刻兜底），
+    保证对不同来源构造的 option 都能工作。
+    """
+    best: dict[tuple, dict] = {}
+    for o in options:
+        legs = o.get("legs") or []
+        if legs:
+            leg_key = tuple((l.get("code"), l.get("depart")) for l in legs)
+        else:
+            leg_key = (o.get("title"), o.get("depart"), o.get("route"))
+        key = (o.get("mode") or o.get("kind"), leg_key, o.get("seat"))
+        cur = best.get(key)
+        if cur is None or o.get("price", 1e9) < cur.get("price", 1e9):
+            best[key] = o
+    return list(best.values())
+
+
+def rank(options: list[dict], sort: str = "price", limit: int = 40,
+         pareto: bool = False) -> list[dict]:
+    """排序并编号。
+
+    pareto=True 时先做 Pareto 前沿剪枝（见 _pareto_frontier），
+    只保留"没有更便宜且更快的替代方案"的选项，再按 sort 排序。
+    """
+    options = dedup_options(options)
+    if pareto:
+        options = _pareto_frontier(options)
     if sort == "duration":
         options = sorted(options, key=lambda o: (o["duration_min"], o["price"]))
     elif sort == "depart":

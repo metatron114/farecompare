@@ -160,6 +160,55 @@ def _time_to_min(hhmm: str) -> int:
         return -1
 
 
+def _leg_abs(leg: dict, day: int = 0) -> tuple[int, int] | None:
+    """leg 在指定日期的 (发车绝对分钟, 到达绝对分钟)。
+
+    "绝对分钟"以查询日 00:00 为 0 点连续计数，跨夜车次自然落在次日；
+    这样两段车次的衔接判断就退化成一次减法，不必再对跨夜做特例处理。
+    """
+    dep = _time_to_min(leg.get("depart", ""))
+    if dep < 0:
+        return None
+    dep += day * 1440
+    return dep, dep + max(0, int(leg.get("duration_min") or 0))
+
+
+def _connections(arr_abs: int, to_code: str, legs: list[dict],
+                 lo: int = MIN_TRANSFER, hi: int = MAX_TRANSFER,
+                 max_days: int = 3) -> list[tuple[dict, int, int]]:
+    """从"上一腿到达"出发，找所有能衔接的下一腿。
+
+    返回 [(leg, 发车绝对分钟, 换乘间隔分钟), ...]，按发车时间升序。
+
+    要点：第 b 段车次每天都会重开一班，它的实际发车时刻是
+        base + day * 1440   （day = 0,1,2,…）
+    因此必须枚举**所有可能的日子**再去比较间隔，只试"到达当天/次日"会漏掉：
+      * 上一条腿本身跨夜（如大连→上海 T131 历时 25 小时），到达已是 day+1，
+        而真正能衔接的车在 day+2 出发；
+      * 长距离卧铺 + 次日接续的情况。
+    枚举上界由 **到达时刻** 决定：下一腿不可能早于到达（间隔 lo≥0），
+    所以 day 只需遍历到 arr_abs // 1440 + 1。
+    """
+    out: list[tuple[dict, int, int]] = []
+    if arr_abs < 0:
+        return out
+    last_day = min(max_days, arr_abs // 1440 + 1)
+    for b in legs:
+        if b.get("from_code") != to_code:
+            continue
+        base = _time_to_min(b.get("depart", ""))
+        if base < 0:
+            continue
+        for day in range(last_day + 1):
+            dep_abs = base + day * 1440
+            gap = dep_abs - arr_abs
+            if lo <= gap <= hi:
+                out.append((b, dep_abs, gap))
+                break          # 同一天只会匹配一次（间隔区间长度 < 1440 分钟）
+    out.sort(key=lambda x: x[1])
+    return out
+
+
 # 枢纽通达度权重：按该城市在铁路网中的枢纽地位打分（0~5），
 # 与"绕行里程"一起决定候选换乘城市的顺序——既顺路又四通八达的枢纽优先，
 # 避免把请求花在顺路但没有接驳车次的城市上（例如 呼和浩特→长沙 无车）。
