@@ -165,12 +165,24 @@ def _leg_abs(leg: dict, day: int = 0) -> tuple[int, int] | None:
 
     "绝对分钟"以查询日 00:00 为 0 点连续计数，跨夜车次自然落在次日；
     这样两段车次的衔接判断就退化成一次减法，不必再对跨夜做特例处理。
+
+    到达时刻的取值：
+      1) 有 duration_min 时，按 发车 + 历时 计算（能正确处理超过 24 小时的车次）；
+      2) duration_min 缺失或不可信时，回落到钟表时刻差（到达早于发车即视为跨夜 +1440）。
     """
     dep = _time_to_min(leg.get("depart", ""))
     if dep < 0:
         return None
     dep += day * 1440
-    return dep, dep + max(0, int(leg.get("duration_min") or 0))
+    dur = int(leg.get("duration_min") or 0)
+    if dur <= 0:
+        arr = _time_to_min(leg.get("arrive", ""))
+        if arr < 0:
+            return None
+        dur = arr - _time_to_min(leg.get("depart", ""))
+        if dur < 0:
+            dur += 1440          # 到达钟点早于发车钟点 -> 跨夜
+    return dep, dep + dur
 
 
 def _connections(arr_abs: int, to_code: str, legs: list[dict],
@@ -667,38 +679,56 @@ class JourneyPlanner:
     def _match_pairs(ins: list[dict], outs: list[dict]) -> list[tuple[dict, dict, int, bool]]:
         """两段车次配对，返回 (前段, 后段, 间隔分钟, 是否隔夜)。
 
+        算法基于**绝对分钟**（见 _leg_abs / _connections），不再用"到达时刻早于发车时刻
+        就说明跨夜"这种启发式判断——那种写法对历时超过 24 小时的车次（如大连→上海
+        T131 历时 25h28m）会算错间隔。这里按 duration_min 推出真实的到达绝对分钟，
+        即使前段跨了不止一天也能算对。
+
         同日换乘：间隔 30~360 分钟，到站必须等于下一程发站。
         隔夜换乘：当天已无接续时，允许"前段 22:00 前到达 + 次日 06:00~12:00 出发"，
-                  间隔按"到站到当晚 24:00 + 次日 0:00 到发车"计算，方便长途过夜中转。
+                  间隔按"到站到当晚 24:00 + 次日 0:00 到发车"计算。
         """
         cand_in = sorted(ins, key=lambda r: _time_to_min(r["depart"]))[:HUB_LEG_TOP]
         cand_out = sorted(outs, key=lambda r: _time_to_min(r["depart"]))[:HUB_LEG_TOP * 2]
+
+        # 保留原有"隔夜班次"的时间窗口约束（6:00~12:00 出发、8~20 小时间隔）
+        def _overnight_window(arr_min: int, dep_min: int) -> int | None:
+            if arr_min > 22 * 60 or not (6 * 60 <= dep_min <= 12 * 60):
+                return None
+            night_gap = (24 * 60 - arr_min) + dep_min
+            return night_gap if 8 * 60 <= night_gap <= 20 * 60 else None
+
         same_day: list[tuple[dict, dict, int, bool]] = []
         overnight: list[tuple[dict, dict, int, bool]] = []
         for a in cand_in:
-            if a["to_code"] is None:
+            to_code = a.get("to_code")
+            if not to_code:
                 continue
-            arr_min = _time_to_min(a["arrive"])
-            if arr_min < 0:
+            arr = _leg_abs(a)
+            if arr is None:
                 continue
-            dep_min_a = _time_to_min(a["depart"])
-            crosses = arr_min < dep_min_a          # 前段本身跨夜
+            _dep_a_abs, arr_abs = arr
+
+            # ① 同日衔接（间隔 30~360 分钟）
+            for b, _dep_abs, gap in _connections(arr_abs, to_code, cand_out):
+                same_day.append((a, b, gap, False))
+
+            # ② 隔夜衔接（当天已无接续时使用）
             for b in cand_out:
-                if a["to_code"] != b["from_code"]:
+                if b.get("from_code") != to_code:
                     continue
-                dep_min = _time_to_min(b["depart"])
+                dep_min = _time_to_min(b.get("depart", ""))
                 if dep_min < 0:
                     continue
-                gap = dep_min - arr_min
-                if crosses:
-                    gap += 24 * 60
-                if MIN_TRANSFER <= gap <= MAX_TRANSFER:
-                    same_day.append((a, b, gap, False))
-                elif arr_min <= 22 * 60 and 6 * 60 <= dep_min <= 12 * 60:
-                    # 隔夜：到站后住一晚，次日早晨再出发
-                    night_gap = (24 * 60 - arr_min) + dep_min
-                    if 8 * 60 <= night_gap <= 20 * 60:
-                        overnight.append((a, b, night_gap, True))
+                night_gap = _overnight_window(arr_abs % 1440, dep_min)
+                if night_gap is None:
+                    continue
+                # 用绝对分钟算真实间隔，避免"到站当天"与"次日"混淆
+                candidates = _connections(arr_abs, to_code, [b], lo=8 * 60, hi=20 * 60)
+                if candidates:
+                    _b, _dep_abs2, real_gap = candidates[0]
+                    overnight.append((a, b, real_gap, True))
+
         # 同日优先；同日无解时才给出隔夜方案
         return same_day if same_day else overnight
 
